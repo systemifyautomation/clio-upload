@@ -4,6 +4,7 @@ This API can be integrated with n8n for automation workflows
 """
 
 import os
+import tempfile
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from clio_client import ClioAPIClient
@@ -103,8 +104,9 @@ def upload_file():
             if uploaded_file.filename == "":
                 return jsonify({"error": "No file selected"}), 400
             
-            # Save file temporarily
-            temp_dir = Path("/tmp/clio_uploads")
+            # Save file temporarily using tempfile for cross-platform compatibility
+            import tempfile
+            temp_dir = Path(tempfile.gettempdir()) / "clio_uploads"
             temp_dir.mkdir(exist_ok=True)
             temp_file_path = temp_dir / uploaded_file.filename
             uploaded_file.save(str(temp_file_path))
@@ -150,6 +152,9 @@ def upload_folder():
         - region: Override default region (optional)
     """
     try:
+        if not request.is_json:
+            return jsonify({"error": "Request body must be JSON"}), 400
+        
         data = request.get_json()
         
         if not data:
@@ -200,6 +205,9 @@ def create_folder():
         - region: Override default region (optional)
     """
     try:
+        if not request.is_json:
+            return jsonify({"error": "Request body must be JSON"}), 400
+        
         data = request.get_json()
         
         if not data:
