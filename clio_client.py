@@ -4,10 +4,14 @@ Supports OAuth authentication and EU endpoint (eu.app.clio.com)
 """
 
 import os
+import logging
 import mimetypes
 from typing import Optional, Dict, Any, List
 import requests
 from pathlib import Path
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class ClioAPIClient:
@@ -159,8 +163,10 @@ class ClioAPIClient:
                         matter_id=matter_id
                     )
                     results["files"].append(file_result)
-                except Exception as e:
-                    print(f"Error uploading file {item}: {e}")
+                except (FileNotFoundError, IOError, requests.RequestException) as e:
+                    logger.error(f"Error uploading file {item}: {e}")
+                    # Re-raise to allow caller to handle or continue based on their needs
+                    raise
             
             elif item.is_dir():
                 # Recursively upload subdirectory
@@ -172,8 +178,10 @@ class ClioAPIClient:
                     )
                     results["folders"].extend(sub_results["folders"])
                     results["files"].extend(sub_results["files"])
-                except Exception as e:
-                    print(f"Error uploading folder {item}: {e}")
+                except (ValueError, IOError, requests.RequestException) as e:
+                    logger.error(f"Error uploading folder {item}: {e}")
+                    # Re-raise to allow caller to handle or continue based on their needs
+                    raise
         
         return results
     
