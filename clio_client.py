@@ -68,7 +68,10 @@ class ClioAPIClient:
     def upload_file(self, file_path: str, folder_id: Optional[int] = None,
                    matter_id: Optional[int] = None, description: Optional[str] = None) -> Dict[str, Any]:
         """
-        Upload a file to Clio
+        Upload a file to Clio using the 3-step process:
+        1. Create document record and get upload URL
+        2. Upload file to S3
+        3. Mark document as fully uploaded
         
         Args:
             file_path: Path to the file to upload
@@ -79,40 +82,96 @@ class ClioAPIClient:
         Returns:
             Dictionary containing the uploaded document information
         """
-        url = f"{self.base_url}/documents.json"
-        
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        
-        # Prepare form data
-        form_data = {}
-        
-        if folder_id:
-            form_data["data[parent][id]"] = str(folder_id)
-            form_data["data[parent][type]"] = "Folder"
-        
-        if matter_id:
-            form_data["data[matter][id]"] = str(matter_id)
-        
-        if description:
-            form_data["data[description]"] = description
         
         # Determine MIME type
         mime_type, _ = mimetypes.guess_type(file_path)
         if mime_type is None:
             mime_type = "application/octet-stream"
         
-        # Prepare file upload
-        with open(file_path, "rb") as f:
-            files = {
-                "data[document]": (file_path_obj.name, f, mime_type)
-            }
-            
-            response = requests.post(url, headers=self.headers, data=form_data, files=files)
-            response.raise_for_status()
+        print(f"\n=== STEP 1: Creating document record ===")
         
-        return response.json()
+        # Step 1: Create document record
+        url = f"{self.base_url}/documents.json"
+        params = {"fields": "id,latest_document_version{uuid,put_url,put_headers}"}
+        
+        data = {
+            "data": {
+                "name": file_path_obj.name,
+                "parent": {}
+            }
+        }
+        
+        # Set parent - either folder or matter
+        if folder_id:
+            data["data"]["parent"]["id"] = folder_id
+            data["data"]["parent"]["type"] = "Folder"
+        elif matter_id:
+            data["data"]["parent"]["id"] = matter_id
+            data["data"]["parent"]["type"] = "Matter"
+        
+        # Set matter association if provided
+        if matter_id:
+            data["data"]["matter"] = {"id": matter_id}
+        
+        # Set description if provided
+        if description:
+            data["data"]["description"] = description
+        
+        print(f"Request URL: {url}")
+        print(f"Request data: {data}")
+        
+        response = requests.post(url, headers=self.headers, json=data, params=params)
+        print(f"Response status: {response.status_code}")
+        print(f"Response body: {response.text}")
+        response.raise_for_status()
+        
+        result = response.json()
+        document_id = result["data"]["id"]
+        version_data = result["data"]["latest_document_version"]
+        uuid = version_data["uuid"]
+        put_url = version_data["put_url"]
+        put_headers = {h["name"]: h["value"] for h in version_data["put_headers"]}
+        
+        print(f"\n=== STEP 2: Uploading file to S3 ===")
+        print(f"Document ID: {document_id}")
+        print(f"UUID: {uuid}")
+        print(f"Upload URL: {put_url[:100]}...")
+        print(f"Upload headers: {put_headers}")
+        
+        # Step 2: Upload file to S3
+        with open(file_path, "rb") as f:
+            file_content = f.read()
+            upload_response = requests.put(put_url, data=file_content, headers=put_headers)
+            print(f"Upload response status: {upload_response.status_code}")
+            if upload_response.status_code not in [200, 201, 204]:
+                print(f"Upload response body: {upload_response.text}")
+            upload_response.raise_for_status()
+        
+        print(f"\n=== STEP 3: Marking document as fully uploaded ===")
+        
+        # Step 3: Mark document as fully uploaded
+        update_url = f"{self.base_url}/documents/{document_id}.json"
+        update_params = {"fields": "id,name,latest_document_version{fully_uploaded}"}
+        update_data = {
+            "data": {
+                "uuid": uuid,
+                "fully_uploaded": True
+            }
+        }
+        
+        print(f"Update URL: {update_url}")
+        print(f"Update data: {update_data}")
+        
+        update_response = requests.patch(update_url, headers=self.headers, json=update_data, params=update_params)
+        print(f"Update response status: {update_response.status_code}")
+        print(f"Update response body: {update_response.text}")
+        update_response.raise_for_status()
+        
+        print(f"\n=== Upload complete! ===\n")
+        return update_response.json()
     
     def upload_folder(self, folder_path: str, parent_folder_id: Optional[int] = None,
                      matter_id: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
