@@ -150,6 +150,9 @@ def upload_folder():
         - region: Override default region (optional)
     """
     try:
+        if not request.is_json:
+            return jsonify({"error": "Request body must be JSON"}), 400
+        
         data = request.get_json()
         
         if not data:
@@ -200,6 +203,9 @@ def create_folder():
         - region: Override default region (optional)
     """
     try:
+        if not request.is_json:
+            return jsonify({"error": "Request body must be JSON"}), 400
+        
         data = request.get_json()
         
         if not data:
